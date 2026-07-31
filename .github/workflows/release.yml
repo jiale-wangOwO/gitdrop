@@ -34,13 +34,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name GitDrop --collect-all tkinterdnd2 main.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name GitDrop --collect-all tkinterdnd2 --collect-all certifi main.py
           Compress-Archive -Path dist/GitDrop.exe,README.md,LICENSE -DestinationPath GitDrop-Windows.zip
 
       - name: Build macOS application
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --noconfirm --clean --windowed --name GitDrop --collect-all tkinterdnd2 main.py
+          pyinstaller --noconfirm --clean --windowed --name GitDrop --collect-all tkinterdnd2 --collect-all certifi main.py
           ditto -c -k --sequesterRsrc --keepParent dist/GitDrop.app GitDrop-macOS.zip
 
       - uses: actions/upload-artifact@v4
