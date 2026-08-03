@@ -7,6 +7,8 @@ import stat
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +24,65 @@ if getattr(sys, "frozen", False):
 else:
     APP_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = APP_DIR / ".gitdrop-cache"
+
+
+def _normalise_proxy_url(proxy: str | None) -> str | None:
+    if not proxy:
+        return None
+
+    proxy = proxy.strip()
+    if not proxy:
+        return None
+
+    if "://" not in proxy:
+        proxy = f"http://{proxy}"
+
+    return proxy
+
+
+def _detect_proxy() -> str | None:
+    """Return the proxy GitDrop should pass to Git."""
+    environment_names = (
+        "GITDROP_HTTPS_PROXY",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    )
+
+    for name in environment_names:
+        proxy = _normalise_proxy_url(os.environ.get(name))
+        if proxy:
+            return proxy
+
+    if platform.system() != "Darwin":
+        return None
+
+    try:
+        if urllib.request.proxy_bypass("github.com"):
+            return None
+        proxies = urllib.request.getproxies()
+    except (OSError, ValueError):
+        return None
+
+    return _normalise_proxy_url(
+        proxies.get("https") or proxies.get("http") or proxies.get("all")
+    )
+
+
+def _proxy_display_name(proxy: str) -> str:
+    """Return a diagnostic-safe proxy URL without credentials or path data."""
+    try:
+        parsed = urllib.parse.urlsplit(proxy)
+        if not parsed.hostname:
+            return "已配置代理"
+        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        return f"{parsed.scheme}://{host}{port}"
+    except ValueError:
+        return "已配置代理"
 
 
 class GitSyncError(RuntimeError):
@@ -42,12 +103,18 @@ class LocalGitTransport:
         repository: str,
         branch: str = "main",
         cache_dir: Path | None = None,
+        proxy_url: str | None = None,
     ):
         self.token = token.strip()
         self.owner = owner.strip()
         self.repository = repository.strip()
         self.branch = branch.strip() or "main"
         self.cache_dir = cache_dir or CACHE_DIR
+        self.proxy_url = (
+            _normalise_proxy_url(proxy_url)
+            if proxy_url is not None
+            else _detect_proxy()
+        )
 
     @property
     def repository_url(self) -> str:
@@ -66,6 +133,15 @@ class LocalGitTransport:
                 "GITDROP_TOKEN": self.token,
             }
         )
+        if self.proxy_url:
+            environment.update(
+                {
+                    "HTTPS_PROXY": self.proxy_url,
+                    "https_proxy": self.proxy_url,
+                    "HTTP_PROXY": self.proxy_url,
+                    "http_proxy": self.proxy_url,
+                }
+            )
         return environment
 
     def _askpass_path(self) -> Path:
@@ -99,7 +175,10 @@ class LocalGitTransport:
                 time.sleep(0.15)
 
     def _run(self, arguments: list[str], cwd: Path | None = None, timeout: int = 180) -> str:
-        command = ["git", *arguments]
+        command = ["git"]
+        if self.proxy_url:
+            command.extend(["-c", f"http.proxy={self.proxy_url}"])
+        command.extend(arguments)
         try:
             result = subprocess.run(
                 command,
@@ -117,8 +196,28 @@ class LocalGitTransport:
             raise GitSyncError("连接 GitHub 超时，请检查网络后重试") from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
+            if self.token:
+                detail = detail.replace(self.token, "[REDACTED]")
             if "Authentication failed" in detail or "could not read Password" in detail:
                 detail = "Token 无效或没有仓库写入权限"
+            network_markers = (
+                "SSL_ERROR_SYSCALL",
+                "Connection reset by peer",
+                "Recv failure",
+                "Could not resolve host",
+                "Failed to connect",
+                "Connection timed out",
+            )
+            if any(marker.lower() in detail.lower() for marker in network_markers):
+                proxy_hint = (
+                    f"当前检测到代理：{_proxy_display_name(self.proxy_url)}"
+                    if self.proxy_url
+                    else "未检测到可供 Git 使用的代理"
+                )
+                detail = (
+                    f"{detail}\n\n{proxy_hint}。\n"
+                    "请检查系统代理、VPN/代理节点，以及 github.com 是否命中代理规则。"
+                )
             raise GitSyncError(detail or f"Git 命令执行失败：{' '.join(arguments[:2])}")
         return result.stdout.strip()
 
