@@ -85,6 +85,50 @@ def _proxy_display_name(proxy: str) -> str:
         return "已配置代理"
 
 
+def _proxy_has_credentials(proxy: str) -> bool:
+    """Return whether a proxy URL contains user information."""
+    try:
+        parsed = urllib.parse.urlsplit(proxy)
+        return parsed.username is not None or parsed.password is not None
+    except ValueError:
+        return "@" in proxy
+
+
+def _redact_proxy_credentials(detail: str, proxy: str | None) -> str:
+    """Remove proxy credentials and their encoded forms from Git output."""
+    if not proxy or not _proxy_has_credentials(proxy):
+        return detail
+
+    try:
+        parsed = urllib.parse.urlsplit(proxy)
+    except ValueError:
+        parsed = None
+
+    sensitive_values = {proxy, urllib.parse.unquote(proxy)}
+    if parsed is not None:
+        if "@" in parsed.netloc:
+            user_info = parsed.netloc.rsplit("@", 1)[0]
+            sensitive_values.update((user_info, urllib.parse.unquote(user_info)))
+        for credential in (parsed.username, parsed.password):
+            if credential:
+                sensitive_values.update(
+                    (credential, urllib.parse.unquote(credential))
+                )
+
+    for value in tuple(sensitive_values):
+        sensitive_values.update(
+            (
+                urllib.parse.quote(value, safe=""),
+                urllib.parse.quote_plus(value, safe=""),
+            )
+        )
+
+    for value in sorted(filter(None, sensitive_values), key=len, reverse=True):
+        detail = detail.replace(value, "[REDACTED_PROXY_CREDENTIALS]")
+
+    return detail
+
+
 class GitSyncError(RuntimeError):
     pass
 
@@ -176,7 +220,7 @@ class LocalGitTransport:
 
     def _run(self, arguments: list[str], cwd: Path | None = None, timeout: int = 180) -> str:
         command = ["git"]
-        if self.proxy_url:
+        if self.proxy_url and not _proxy_has_credentials(self.proxy_url):
             command.extend(["-c", f"http.proxy={self.proxy_url}"])
         command.extend(arguments)
         try:
@@ -196,6 +240,7 @@ class LocalGitTransport:
             raise GitSyncError("连接 GitHub 超时，请检查网络后重试") from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
+            detail = _redact_proxy_credentials(detail, self.proxy_url)
             if self.token:
                 detail = detail.replace(self.token, "[REDACTED]")
             if "Authentication failed" in detail or "could not read Password" in detail:

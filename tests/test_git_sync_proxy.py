@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import unittest
+import urllib.parse
 from unittest.mock import patch
 
 from gitdrop.git_sync import (
@@ -136,6 +137,31 @@ class GitProxyPropagationTests(unittest.TestCase):
             self.assertEqual(environment[name], proxy)
         self.assertNotIn("secret-token", command)
 
+    def test_credentialed_proxy_is_only_passed_in_environment(self):
+        proxy = "http://proxy-user:proxy-password@127.0.0.1:1082"
+        transport = LocalGitTransport(
+            "secret-token",
+            "owner",
+            "repository",
+            proxy_url=proxy,
+        )
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+
+        with patch("gitdrop.git_sync.subprocess.run", return_value=completed) as run:
+            transport._run(["clone", "remote", "local"])
+
+        command = run.call_args.args[0]
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(command, ["git", "clone", "remote", "local"])
+        self.assertNotIn(proxy, command)
+        for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+            self.assertEqual(environment[name], proxy)
+
     def test_network_error_has_proxy_hint_without_credentials(self):
         proxy = "http://proxy-user:proxy-password@127.0.0.1:1082/private"
         transport = LocalGitTransport(
@@ -148,7 +174,7 @@ class GitProxyPropagationTests(unittest.TestCase):
             args=[],
             returncode=1,
             stdout="",
-            stderr="Recv failure: Connection reset by peer",
+            stderr=f"Recv failure through {proxy}: Connection reset by peer",
         )
 
         with patch("gitdrop.git_sync.subprocess.run", return_value=completed):
@@ -157,9 +183,37 @@ class GitProxyPropagationTests(unittest.TestCase):
 
         detail = str(raised.exception)
         self.assertIn("当前检测到代理：http://127.0.0.1:1082", detail)
+        self.assertNotIn(proxy, detail)
         self.assertNotIn("proxy-user", detail)
         self.assertNotIn("proxy-password", detail)
         self.assertNotIn("secret-token", detail)
+
+    def test_url_encoded_proxy_credentials_are_redacted_from_git_errors(self):
+        proxy = "http://proxy-user:p%40ssword@127.0.0.1:1082"
+        encoded_proxy = urllib.parse.quote(proxy, safe="")
+        transport = LocalGitTransport(
+            "secret-token",
+            "owner",
+            "repository",
+            proxy_url=proxy,
+        )
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr=f"Failed to connect using {encoded_proxy}",
+        )
+
+        with patch("gitdrop.git_sync.subprocess.run", return_value=completed):
+            with self.assertRaises(GitSyncError) as raised:
+                transport._run(["push"])
+
+        detail = str(raised.exception)
+        self.assertIn("[REDACTED_PROXY_CREDENTIALS]", detail)
+        self.assertNotIn(encoded_proxy, detail)
+        self.assertNotIn("proxy-user", detail)
+        self.assertNotIn("p%40ssword", detail)
+        self.assertNotIn("p@ssword", detail)
 
     def test_token_is_redacted_from_git_errors(self):
         transport = LocalGitTransport(
