@@ -55,6 +55,8 @@ def load_token(owner: str) -> str:
             ["git", "credential", "fill"],
             input=f"protocol=https\nhost=github.com\nusername={owner}\n\n",
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=10,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -77,12 +79,14 @@ def save_token(owner: str, token: str, remember: bool) -> None:
             ["git", "credential", "approve"],
             input=payload,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=10,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if result.returncode != 0:
-            detail = result.stderr.strip() or "Git credential helper 返回错误"
+            detail = (result.stderr or "").strip() or "Git credential helper 返回错误"
             raise RuntimeError(detail)
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"无法访问 Git 凭据存储：{exc}") from exc

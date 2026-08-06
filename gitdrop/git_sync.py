@@ -149,10 +149,10 @@ class LocalGitTransport:
         cache_dir: Path | None = None,
         proxy_url: str | None = None,
     ):
-        self.token = token.strip()
-        self.owner = owner.strip()
-        self.repository = repository.strip()
-        self.branch = branch.strip() or "main"
+        self.token = (token or "").strip()
+        self.owner = (owner or "").strip()
+        self.repository = (repository or "").strip()
+        self.branch = (branch or "main").strip() or "main"
         self.cache_dir = cache_dir or CACHE_DIR
         self.proxy_url = (
             _normalise_proxy_url(proxy_url)
@@ -229,6 +229,8 @@ class LocalGitTransport:
                 cwd=cwd,
                 env=self._environment(),
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=timeout,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -239,7 +241,7 @@ class LocalGitTransport:
         except subprocess.TimeoutExpired as exc:
             raise GitSyncError("连接 GitHub 超时，请检查网络后重试") from exc
         if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()
+            detail = (result.stderr or result.stdout or "").strip()
             detail = _redact_proxy_credentials(detail, self.proxy_url)
             if self.token:
                 detail = detail.replace(self.token, "[REDACTED]")
@@ -264,7 +266,7 @@ class LocalGitTransport:
                     "请检查系统代理、VPN/代理节点，以及 github.com 是否命中代理规则。"
                 )
             raise GitSyncError(detail or f"Git 命令执行失败：{' '.join(arguments[:2])}")
-        return result.stdout.strip()
+        return (result.stdout or "").strip()
 
     def _clone(self, progress: Callable[[str], None]) -> Path:
         progress("正在获取远端最新内容…")
@@ -293,7 +295,8 @@ class LocalGitTransport:
         try:
             worktree = self._clone(progress)
             timestamp = datetime.now().astimezone()
-            batch = worktree / (remote_folder.strip().strip("/\\") or "inbox") / timestamp.strftime("%Y-%m-%d_%H-%M-%S")
+            folder = (remote_folder or "inbox").strip().strip("/\\") or "inbox"
+            batch = worktree / folder / timestamp.strftime("%Y-%m-%d_%H-%M-%S")
             batch.mkdir(parents=True, exist_ok=True)
 
             if message.strip():

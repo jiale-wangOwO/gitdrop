@@ -11,6 +11,12 @@ from tkinter import filedialog, messagebox, ttk
 
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
+from .clipboard import (
+    ClipboardError,
+    cleanup_clipboard_images,
+    paste_paths,
+    remove_clipboard_file,
+)
 from .config import AppConfig, load_config, load_token, save_config, save_token
 from .git_sync import GitSyncError, GitSyncResult, LocalGitTransport
 from .github import GitHubClient, GitHubError
@@ -45,6 +51,9 @@ class GitDropApp:
         self._configure_styles()
         self._build_ui()
         self._load_values()
+        root.bind_all("<Control-v>", self._paste_clipboard_content, add="+")
+        root.bind_all("<Command-v>", self._paste_clipboard_content, add="+")
+        root.protocol("WM_DELETE_WINDOW", self._close)
         if not self.config.owner or not self.token_var.get():
             root.after(0, self._show_settings)
         else:
@@ -124,7 +133,12 @@ class GitDropApp:
         self.file_list.dnd_bind("<<DropEnter>>", self._drag_enter)
         self.file_list.dnd_bind("<<DropLeave>>", self._drag_leave)
         self.file_list.dnd_bind("<<Drop>>", self._drop_paths)
-        self.file_hint = ttk.Label(files_panel, text="拖入文件或文件夹；双击条目或按 Delete 可移除", style="Muted.TLabel")
+        shortcut = "Cmd+V" if platform.system() == "Darwin" else "Ctrl+V"
+        self.file_hint = ttk.Label(
+            files_panel,
+            text=f"拖入文件或文件夹，也可按 {shortcut} 粘贴图片或文件；双击或 Delete 可移除",
+            style="Muted.TLabel",
+        )
         self.file_hint.pack(anchor="w", pady=(8, 0))
         files_panel.outer.pack(fill="both", expand=True)  # type: ignore[attr-defined]
 
@@ -282,6 +296,21 @@ class GitDropApp:
         if selected:
             self._add_paths([Path(selected)])
 
+    def _paste_clipboard_content(self, _event=None) -> str | None:
+        try:
+            paths = paste_paths()
+        except ClipboardError as exc:
+            messagebox.showerror("粘贴失败", str(exc), parent=self.root)
+            return "break"
+        if not paths:
+            # Let text fields keep their normal paste behavior for ordinary text.
+            return None
+        before = len(self.items)
+        self._add_paths(paths)
+        added = len(self.items) - before
+        self.status_text.set(f"已从剪贴板添加 {added} 个文件")
+        return "break"
+
     def _add_paths(self, paths: list[Path]) -> None:
         existing = {(item.source, item.relative_path) for item in self.items}
         self.items.extend(item for item in collect_paths(paths) if (item.source, item.relative_path) not in existing)
@@ -307,19 +336,27 @@ class GitDropApp:
         for item in self.items:
             self.file_list.insert("end", f"  {item.relative_path}    {human_size(item.size)}")
         self.file_hint.configure(
-            text=f"{len(self.items)} 个文件，共 {human_size(total)}；可继续拖入，双击或按 Delete 可移除"
+            text=f"{len(self.items)} 个文件，共 {human_size(total)}；可继续拖入或粘贴"
             if self.items
-            else "拖入文件或文件夹；双击条目或按 Delete 可移除"
+            else f"拖入文件或文件夹，也可按 {'Cmd+V' if platform.system() == 'Darwin' else 'Ctrl+V'} 粘贴图片或文件；双击或 Delete 可移除"
         )
 
     def _remove_selected(self, _event=None) -> None:
         selected = set(self.file_list.curselection())
+        for index in selected:
+            remove_clipboard_file(self.items[index].source)
         self.items = [item for index, item in enumerate(self.items) if index not in selected]
         self._refresh_items()
 
     def _clear_items(self) -> None:
+        for item in self.items:
+            remove_clipboard_file(item.source)
         self.items.clear()
         self._refresh_items()
+
+    def _close(self) -> None:
+        cleanup_clipboard_images()
+        self.root.destroy()
 
     def _start_sync(self) -> None:
         message = self.message_edit.get("1.0", "end-1c").strip()
@@ -329,20 +366,25 @@ class GitDropApp:
         if not self._save_settings():
             self._show_settings()
             return
+        token = self.token_var.get().strip()
         self.send_button.state(["disabled"])
         self.status_text.set("准备发送…")
-        threading.Thread(target=self._sync_worker, args=(message, list(self.items)), daemon=True).start()
+        threading.Thread(
+            target=self._sync_worker,
+            args=(token, message, list(self.items)),
+            daemon=True,
+        ).start()
 
-    def _sync_worker(self, message: str, items: list[UploadItem]) -> None:
+    def _sync_worker(self, token: str, message: str, items: list[UploadItem]) -> None:
         try:
             if not self.repository_url:
                 client = GitHubClient(
-                    self.token_var.get(), self.config.owner, self.config.repository, self.config.branch
+                    token, self.config.owner, self.config.repository, self.config.branch
                 )
                 client.ensure_repository(lambda text: self.events.put(("progress", text)))
                 self.config.branch = client.branch
             transport = LocalGitTransport(
-                self.token_var.get(), self.config.owner, self.config.repository, self.config.branch
+                token, self.config.owner, self.config.repository, self.config.branch
             )
             result = transport.sync(
                 message,
@@ -420,19 +462,20 @@ class GitDropApp:
             return
         self.clear_repository_button.state(["disabled"])
         self.status_text.set("准备清空仓库…")
-        threading.Thread(target=self._clear_repository_worker, daemon=True).start()
+        token = self.token_var.get().strip()
+        threading.Thread(target=self._clear_repository_worker, args=(token,), daemon=True).start()
 
-    def _clear_repository_worker(self) -> None:
+    def _clear_repository_worker(self, token: str) -> None:
         try:
             client = GitHubClient(
-                self.token_var.get(), self.config.owner, self.config.repository, self.config.branch
+                token, self.config.owner, self.config.repository, self.config.branch
             )
             repository = client.inspect_repository()
             if repository is None:
                 raise GitSyncError("远端仓库不存在")
             self.config.branch = repository["branch"]
             transport = LocalGitTransport(
-                self.token_var.get(), self.config.owner, self.config.repository, self.config.branch
+                token, self.config.owner, self.config.repository, self.config.branch
             )
             transport.clear_repository(lambda text: self.events.put(("progress", text)))
             self.events.put(("clear_success", None))

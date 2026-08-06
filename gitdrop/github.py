@@ -20,10 +20,10 @@ class GitHubError(RuntimeError):
 
 class GitHubClient:
     def __init__(self, token: str, owner: str, repository: str, branch: str = "main"):
-        self.token = token.strip()
-        self.owner = owner.strip()
-        self.repository = repository.strip()
-        self.branch = branch.strip() or "main"
+        self.token = (token or "").strip()
+        self.owner = (owner or "").strip()
+        self.repository = (repository or "").strip()
+        self.branch = (branch or "main").strip() or "main"
         self.api_root = "https://api.github.com"
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
