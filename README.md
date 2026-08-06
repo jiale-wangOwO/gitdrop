@@ -81,6 +81,33 @@ inbox/
 - 清空远端内容：在“仓库设置”中点击“清空仓库内容”，确认后删除当前分支中的文件。仓库和提交历史不会被删除。
 - 不保存 Token：取消勾选“使用 Git 凭据管理器记住 Token”。
 
+### macOS 代理和公司网络
+
+GitDrop 会按以下顺序查找可供 Git 子进程使用的代理：
+
+1. `GITDROP_HTTPS_PROXY`
+2. `HTTPS_PROXY` / `https_proxy`
+3. `ALL_PROXY` / `all_proxy`
+4. `HTTP_PROXY` / `http_proxy`
+5. macOS 系统 HTTP/HTTPS 代理
+
+例如，可以从终端为本次启动显式指定代理：
+
+```bash
+GITDROP_HTTPS_PROXY=http://127.0.0.1:1082 \
+  "/Applications/GitDrop.app/Contents/MacOS/GitDrop"
+```
+
+如果使用 Shadowrocket、Clash、Surge 或其他 Fake-IP/TUN 代理，并遇到
+`SSL_ERROR_SYSCALL`、`Connection reset by peer` 或 `Recv failure`，请确认：
+
+- 本地代理端口正在监听；
+- `github.com` 命中代理而不是 `DIRECT`；
+- 当前代理节点可访问 GitHub；
+- 未将 `198.18.0.0/15` 中的 Fake-IP 当作真实 GitHub 地址直接访问。
+
+请勿通过关闭 Git 的 `http.sslVerify` 解决连接问题。GitDrop 会保持 TLS 证书验证开启。
+
 ## 从源码运行
 
 仓库中提供 `start_gitdrop.bat`（Windows）和 `start_gitdrop.command`（macOS）。启动器会在首次运行时自动安装拖放组件，电脑需要 Python 3 和 Git。
