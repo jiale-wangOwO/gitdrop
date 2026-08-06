@@ -37,19 +37,21 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name GitDrop --collect-all tkinterdnd2 --collect-all certifi main.py
-          Compress-Archive -Path dist/GitDrop.exe,README.md,LICENSE -DestinationPath GitDrop-Windows.zip
+          $version = "${{ github.ref_name }}"
+          pyinstaller --noconfirm --clean --onefile --windowed --name "GitDrop-$version" --collect-all tkinterdnd2 --collect-all certifi main.py
+          Compress-Archive -Path "dist/GitDrop-$version.exe",README.md,LICENSE -DestinationPath "GitDrop-$version-Windows.zip"
 
       - name: Build macOS application
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --noconfirm --clean --windowed --name GitDrop --collect-all tkinterdnd2 --collect-all certifi main.py
-          ditto -c -k --sequesterRsrc --keepParent dist/GitDrop.app GitDrop-macOS.zip
+          version="${{ github.ref_name }}"
+          pyinstaller --noconfirm --clean --windowed --name "GitDrop-$version" --collect-all tkinterdnd2 --collect-all certifi main.py
+          ditto -c -k --sequesterRsrc --keepParent "dist/GitDrop-$version.app" "GitDrop-$version-macOS.zip"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: GitDrop-*.zip
+          path: GitDrop-*-*.zip
 
   release:
     needs: build
@@ -63,4 +65,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/GitDrop-*.zip
+          files: artifacts/GitDrop-*-*.zip

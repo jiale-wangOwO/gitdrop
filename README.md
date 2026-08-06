@@ -1,6 +1,6 @@
 # GitDrop
 
-当前版本：`v0.2.0`
+当前版本：`v0.2.1`
 
 GitDrop 是一个面向 Windows 和 macOS 的轻量桌面工具。输入消息，拖入图片、文件或文件夹，即可将它们同步到自己的 GitHub 仓库。
 
@@ -15,10 +15,10 @@ GitDrop 是一个面向 Windows 和 macOS 的轻量桌面工具。输入消息�
 
 前往 [Releases](https://github.com/jiale-wangOwO/gitdrop/releases/latest) 下载并解压：
 
-- Windows 下载 `GitDrop-Windows.zip`，运行 `GitDrop.exe`。
-- macOS 下载 `GitDrop-macOS.zip`，运行 `GitDrop.app`。
+- Windows 下载类似 `GitDrop-v0.2.1-Windows.zip` 的压缩包，运行其中带版本号的 `.exe` 文件。
+- macOS 下载类似 `GitDrop-v0.2.1-macOS.zip` 的压缩包，运行其中带版本号的 `.app` 应用。
 
-macOS 首次打开未签名应用时，请右键点击 `GitDrop.app`，选择“打开”，再确认运行。
+macOS 首次打开未签名应用时，请右键点击带版本号的 `.app` 应用，选择“打开”，再确认运行。
 
 ### 3. 创建 GitHub Token
 
@@ -98,7 +98,7 @@ GitDrop 会按以下顺序查找可供 Git 子进程使用的代理：
 
 ```bash
 GITDROP_HTTPS_PROXY=http://127.0.0.1:1082 \
-  "/Applications/GitDrop.app/Contents/MacOS/GitDrop"
+  "/Applications/GitDrop-v0.2.1.app/Contents/MacOS/GitDrop-v0.2.1"
 ```
 
 如果使用 Shadowrocket、Clash、Surge 或其他 Fake-IP/TUN 代理，并遇到
